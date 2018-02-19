@@ -1,0 +1,281 @@
+---
+title: "Untitled"
+author: "Jihye"
+date: "2/12/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+rm(list = ls())
+library(stringr)
+library(dplyr)
+library(tidyverse)
+library(nycflights13)
+library(RColorBrewer)
+library(viridisLite)
+library(viridis)
+library(readxl)
+```
+
+```{r}
+airlines <- nycflights13::airlines
+airports <- nycflights13::airports
+flights <- nycflights13::flights
+planes <- nycflights13::planes
+weather <- nycflights13::weather
+```
+
+## 1 R4DS Chapter 13 (2 points)    
+
+# 1-1      
+
+Imagine you wanted to draw (approximately) the route each plane flies from its origin to its destination. What variables would you need? What tables would you need to combine?      
+
+I would need variables: origin, dest, lat, lon distance 
+I would need tables: flights, airports 
+
+# 1-2 
+I forgot to draw the relationship between weather and airports. What is the relationship and how should it appear in the diagram? Draw the answer on a sheet of paper, take a picture, and include the results in your problem set submission using the knitr::include_graphics command.
+```{r}
+
+# knitr::include_graphics(path = "Users/JihyeJang/Desktop/ps5/relation.jpg")
+```
+it didn't work so check the jpg file.
+
+# 1-3 
+Compute the average delay by destination, then join on the airports data frame so you can show the spatial distribution of delays. Here???s an easy way to draw a map of the United States: You might want to use the size or colour of the points to display the average delay for each airport.
+
+```{r}
+delay <- flights %>%
+  group_by(dest) %>%
+  mutate(delay_mean = mean(arr_delay, na.rm = TRUE)) %>%
+  left_join(airports, c("dest" = "faa")) 
+
+
+map <- ggplot(data = delay, aes(lon, lat, color = delay_mean)) +
+  borders("state") +
+  geom_point() +
+  coord_quickmap() 
+
+map + scale_color_gradient2(midpoint=0, low="blue", mid="white",
+                     high="red", space ="Lab" )
+```
+
+# 1-4 
+Add the location of the origin and destination (i.e. the lat and lon) to the flights data frame.
+```{r}
+flights <- flights %>%
+  group_by(dest) %>%
+  left_join(airports, c("dest" = "faa")) %>%
+  select(-name, -alt, -tz, -dst, -tzone)
+```
+
+# 1-5 
+Question: Is there a relationship between the age of a plane and its delays? (Use the question, query, result, answer framework to answer this question.)    
+First, we need to merge flights and planes dataset.   
+
+```{r}
+delay_plane <- delay %>%
+  left_join(planes, by = "tailnum") 
+```
+
+```{r}
+ggplot(delay_plane, aes(x = cut_width(year.y, 8), y = delay_mean)) +
+  geom_boxplot()
+
+delay_plane_recent <- delay_plane %>%
+  filter(year.y >= 1990)
+ggplot(delay_plane_recent, aes(x = cut_width(year.y, 3), y = delay_mean)) +
+  geom_boxplot()
+```    
+From two graphs we can see that planes made between [1996,2008] have more variations in times of delay. In general, delay time has increased from 1996 to 2006 and started to drop, variance also dropped.    
+
+# 1-6 
+Question: What weather conditions make it more likely to see a delay? (Use the question, query, result, answer framework to answer this question.)    
+First, we need to merge flights and weather dataset.    
+
+```{r}
+
+delay_weather <- delay %>%
+  mutate(dep_hour = ceiling(dep_time/100)) %>%
+  left_join(weather, by = c("origin" = "origin", "year" = "year", "month" = "month", "day" = "day", "dep_hour" = "hour")) 
+```
+
+```{r}
+ggplot(delay_weather) +
+  geom_point(aes(x = precip, y = delay_mean),alpha = 0.2) 
+```
+
+```{r}
+ggplot(delay_weather, aes(x = cut_width(precip, 0.1), y = delay_mean)) +
+  geom_boxplot()
+```    
+i applied the same code to other variables and it seemes that i don't see any significant correlation. 
+Normally we would expect precipitation expect the delay most, but it seems the day with less rain have more delayed flights as well as more variation in delay, which in part can be expalined by the fact if it rains too hard, the flight might not take off at all.   
+
+# 1-7 
+Question: What happened on June 13 2013? Display the spatial pattern of delays, and then use Google to cross-reference with the weather. (Use the question, query, result, answer framework to answer this question.)
+```{r}
+delay_130613 <- delay_weather %>%
+  filter(year == 2013 & month == 6 & day ==  13) 
+
+map <- ggplot(data = delay_130613, aes(lon, lat, color = delay_mean)) +
+  borders("state") +
+  geom_point() +
+  coord_quickmap() 
+
+map + scale_color_gradient2(midpoint= 0, low="blue", mid="white",
+                     high="red", space ="Lab" ) 
+```
+
+# 1-8 
+What does it mean for a flight to have a missing tailnum? What do the tail numbers that don't have a matching record in planes have in common? (Hint: one variable explains ~90% of the problems.)    
+We need flights and planes dataset to identify what distinct characteristics a flight has when it has a missing tailnum.   
+
+```{r}
+flights_planes_na <- flights %>%
+  anti_join(planes, by = "tailnum") %>%
+  group_by(carrier) %>%
+  count(carrier) %>%
+  arrange(desc(n)) 
+```   
+We can see that AA and MQ have a large number of missing tail number.    
+
+# 1-9 
+What does anti_join(flights, airports, by = c("dest" = "faa")) tell you? What does
+anti_join(airports, flights, by = c("faa" = "dest")) tell you?
+```{r}
+anti_join(flights, airports, by = c("dest" = "faa"))
+anti_join(airports, flights, by = c("faa" = "dest"))
+```     
+
+anti_join(flights, airports, by = c("dest" = "faa")) means the dest in these observations are not in the airports dataset, so they are either not registered or are foreign airports.
+
+anti_join(airports, flights, by = c("faa" = "dest")) means the airports in these observations are not in the flights dataset, there were no planes that flew to those airports.    
+
+# 1-10 
+Is each plane is flown by a single airline? How many planes change ownership within the nycflight13 dataset?    
+```{r}
+flights %>%
+  group_by(carrier,tailnum) %>%
+  count() %>%
+  filter(n > 1) %>%
+  distinct(tailnum)
+```    
+We have 3896 rows so 3896 planes change owbership within the dataset.   
+
+
+## 2 R4DS Chapter 14 (2 points)
+
+# 2-1 
+Use str_length() and str_sub() to extract the middle character from a string. What will you do if the string has an even number of characters?      
+If the string has an even number od characters, I will just extract the first one (of the middle charater).
+```{r}
+string1 <- "apple"
+string2 <- "love"
+str_sub(string1, ceiling(str_length(string1)/2),ceiling(str_length(string1)/2))
+str_sub(string2, ceiling(str_length(string2)/2),ceiling(str_length(string2)/2))
+```      
+
+# 2-2 
+Write code that turns the vector c("a", "b", "c") into the string a, b, and c. (Hint: read the help file for str_c). Extra credit (0.25 points): write a function that does the operation above and think carefully about the function should do if given a vector of length 0, 1, or 2.
+```{r}
+str_c(c("a", "b", "c"), collapse = " ")
+```
+```{r}
+str_collapse <- function(x, sep = ",") {
+  if (length(x) > 1) {
+    str_c(x, collapse = " ")
+  } 
+  else {
+    x
+  }
+}
+
+str_collapse("a")
+str_collapse(c("a","b"))
+str_collapse(c("a","b","c"))
+```
+
+# 2-3 
+How would you match "cienc" Give three examples of strings that would match this regular expression.    
+```{r}
+word <- "cienc"
+word[str_detect(word, "cienc")]
+word[str_detect(word, "^cienc$")]
+word[str_detect(word, "cien.")]
+
+```     
+
+# 2-4 
+Consider "Dean Baicker c/o Tanya Hines". How would you match the abbreviation for "care of" 
+```{r}
+string <- "Dean Baicker c/o Tanya Hines"
+str_detect(string, "c/o")
+```     
+
+# 2-5 
+
+Given the corpus of common words in stringr::words, create regular expressions that find all words
+that:
+1. Start with "y".
+2. End with "x"
+3. Are exactly three letters long. (Don't cheat by using str_length()!)
+4. Have seven letters or more. (Note: including all the output here would make grading difficult.
+instead, use sum(str_detect(stringr::words,regex)) to count the number of strings that
+match each of the patterns above)
+
+```{r}
+words <- stringr::words
+sum(str_detect(words, "^y"))
+sum(str_detect(words,"x$"))
+sum(str_detect(words, "^...$"))
+sum(str_detect(words, "......*"))
+```
+
+# 2-6 
+
+Create regular expressions to find all words in stringr::words that:
+1. Start with a vowel.
+2. That only contain consonants. (Hint: thinking about matching ???not???-vowels.)
+3. End with ed, but not with eed.
+4. End with ing or ise.   
+```{r}
+sum(str_detect(words, "^[aeiou]"))
+sum(str_detect(words,".*")) - sum(str_detect(words, "[aeiou]"))
+sum(str_detect(words, "ed$")) - sum(str_detect(words, "eed$"))
+sum(str_detect(words, "(ing|ise)$"))
+```    
+
+# 2-7
+Show how telephone numbers are written in your country with three examples. Create a regular
+expression that will match telephone numbers as commonly written in your country.     
+```{r}
+numbers <- c("010-9112-7504", "(+82) 10-9112-7504")
+str_detect(numbers, "\\d\\d\\d-\\d\\d\\d\\d-\\d\\d\\d\\d")
+str_detect(numbers, "\\(\\+\\d\\d\\)\\s\\d\\d-\\d\\d\\d\\d-\\d\\d\\d\\d")
+```
+
+# 2-8 
+Split up the string "apples, pears, and bananas" into individual components. Note: don???t try to match the letters explicitly. Instead, use what you learned in the string splitting section of lecture.    
+```{r}
+string <- c("apples, pears, and bananas")
+str_split(string, boundary("word"))
+```
+
+# 2-9 
+Why is it better to split up by boundary("word") than " "?
+
+```{r}
+string <- c("apples, pears, and bananas")
+
+str_split(string, "")
+str_split(string, boundary("word"))
+```   
+
+boundary("word") splits on "," and " ". On the contrary, " " splits string into individual alphabets and space. 
